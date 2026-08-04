@@ -5,25 +5,26 @@ resource "random_password" "password" {
 }
 
 
-resource "proxmox_vm_qemu" "master_nodes" {
-  for_each         = local.vms
-  vmid             = each.value.id
-  name             = each.key
-  target_node      = "pve"
-  agent            = 1
-  cores            = each.value.id > 2 ? 4 : 2
+resource "proxmox_vm_qemu" "nodes" {
+  for_each    = local.vms
+  vmid        = each.value.id
+  name        = each.key
+  target_node = "pve"
+  agent       = 1
+
+  boot   = "order=scsi0"    # has to be the same as the OS disk of the template
+  clone  = "alma-cloudinit" # The name of the template
+  scsihw = "virtio-scsi-single"
+
   memory           = each.value.id > 2 ? 4096 : 2048
-  boot             = "order=scsi0"    # has to be the same as the OS disk of the template
-  clone            = "alma-cloudinit" # The name of the template
-  scsihw           = "virtio-scsi-single"
-  vm_state         = "running"
+  power_state      = "running"
   automatic_reboot = true
 
   # Cloud-Init configuration
   cicustom   = "vendor=local:snippets/qemu-guest-agent.yml" # /var/lib/vz/snippets/qemu-guest-agent.yml
   ciupgrade  = true
   nameserver = "1.1.1.1 8.8.8.8"
-  ipconfig0  = "${each.value.ip}/24,gw=10.0.0.1,ip6=dhcp"
+  ipconfig0  = "ip=${each.value.ip}/24,gw=10.0.0.1"
   skip_ipv6  = true
   ciuser     = "root"
   cipassword = random_password.password.result
@@ -32,6 +33,12 @@ resource "proxmox_vm_qemu" "master_nodes" {
   # Most cloud-init images require a serial device for their display
   serial {
     id = 0
+  }
+
+  cpu {
+    cores   = each.value.id > 2 ? 4 : 2
+    sockets = 1
+    type    = "host"
   }
 
   disks {
@@ -56,7 +63,15 @@ resource "proxmox_vm_qemu" "master_nodes" {
   }
 
   network {
-    bridge = "vmbr0"
+    id     = 0
+    bridge = "prodvpc"
     model  = "virtio"
   }
+
+
+}
+
+output "vm_details" {
+  value     = { for k, v in proxmox_vm_qemu.nodes : k => { ip : v.ipconfig0, password : v.cipassword } }
+  sensitive = true
 }
