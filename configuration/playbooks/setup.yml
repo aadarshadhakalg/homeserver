@@ -1,0 +1,51 @@
+---
+# Base OS prep for every node. Run before rke2.yml.
+# Usage: ansible-playbook playbooks/setup.yml
+
+- name: Prepare nodes
+  hosts: all
+  tasks:
+    - name: Set hostname
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+
+    - name: Map cluster hosts in /etc/hosts
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} ANSIBLE homeserver"
+        block: |
+          {% for h in groups['all'] %}
+          {{ hostvars[h].ansible_host }} {{ h }}
+          {% endfor %}
+
+    - name: Install base packages
+      ansible.builtin.dnf:
+        name:
+          - curl
+          - tar
+          - chrony
+        state: present
+
+    - name: Enable time sync (etcd is picky about clock skew)
+      ansible.builtin.systemd:
+        name: chronyd
+        state: started
+        enabled: true
+
+    - name: Disable firewalld (flat homelab network)
+      ansible.builtin.systemd:
+        name: firewalld
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Turn off swap now
+      ansible.builtin.command: swapoff -a
+      when: ansible_swaptotal_mb | default(0) > 0
+      changed_when: true
+
+    - name: Turn off swap in /etc/fstab
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^([^#].*\sswap\s.*)$'
+        replace: '# \1'

@@ -1,0 +1,152 @@
+---
+# Installs an RKE2 cluster: master_nodes -> servers (HA control plane), worker_nodes -> agents.
+# Usage: ansible-playbook playbooks/rke2.yml
+
+- name: RKE2 control plane
+  hosts: master_nodes
+  serial: 1 # first master must be up before the others can join
+  vars:
+    rke2_first: "{{ groups['master_nodes'][0] }}"
+    rke2_version: "" # empty = latest stable channel
+  tasks:
+    - name: Download RKE2 installer
+      ansible.builtin.get_url:
+        url: https://get.rke2.io
+        dest: /tmp/rke2-install.sh
+        mode: "0755"
+
+    - name: Install RKE2 server
+      ansible.builtin.command:
+        cmd: /tmp/rke2-install.sh
+        creates: /usr/local/bin/rke2
+      environment:
+        INSTALL_RKE2_TYPE: server
+        INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+
+    - name: Ensure config directory
+      ansible.builtin.file:
+        path: /etc/rancher/rke2
+        state: directory
+        mode: "0755"
+
+    - name: Write RKE2 config
+      ansible.builtin.copy:
+        dest: /etc/rancher/rke2/config.yaml
+        mode: "0600"
+        content: |
+          write-kubeconfig-mode: "0600"
+          tls-san:
+          {% for h in groups['master_nodes'] %}
+            - {{ hostvars[h].ansible_host }}
+          {% endfor %}
+          {% if inventory_hostname != rke2_first %}
+          server: https://{{ hostvars[rke2_first].ansible_host }}:9345
+          token: {{ hostvars[rke2_first].rke2_token }}
+          {% endif %}
+
+    - name: Start rke2-server
+      ansible.builtin.systemd:
+        name: rke2-server
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    - name: Wait for node token
+      ansible.builtin.wait_for:
+        path: /var/lib/rancher/rke2/server/node-token
+        timeout: 600
+
+    - name: Wait for kube-apiserver
+      ansible.builtin.wait_for:
+        port: 6443
+        timeout: 600
+
+    - name: Read node token
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/rke2/server/node-token
+      register: rke2_token_file
+      when: inventory_hostname == rke2_first
+
+    - name: Publish node token to the other nodes
+      ansible.builtin.set_fact:
+        rke2_token: "{{ rke2_token_file.content | b64decode | trim }}"
+      when: inventory_hostname == rke2_first
+
+    - name: Put kubectl and kubeconfig on PATH
+      ansible.builtin.copy:
+        dest: /etc/profile.d/rke2.sh
+        mode: "0644"
+        content: |
+          export PATH=$PATH:/var/lib/rancher/rke2/bin
+          export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+
+- name: RKE2 workers
+  hosts: worker_nodes
+  vars:
+    rke2_first: "{{ groups['master_nodes'][0] }}"
+    rke2_version: ""
+  tasks:
+    - name: Download RKE2 installer
+      ansible.builtin.get_url:
+        url: https://get.rke2.io
+        dest: /tmp/rke2-install.sh
+        mode: "0755"
+
+    - name: Install RKE2 agent
+      ansible.builtin.command:
+        cmd: /tmp/rke2-install.sh
+        creates: /usr/local/bin/rke2
+      environment:
+        INSTALL_RKE2_TYPE: agent
+        INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+
+    - name: Ensure config directory
+      ansible.builtin.file:
+        path: /etc/rancher/rke2
+        state: directory
+        mode: "0755"
+
+    - name: Write RKE2 config
+      ansible.builtin.copy:
+        dest: /etc/rancher/rke2/config.yaml
+        mode: "0600"
+        content: |
+          server: https://{{ hostvars[rke2_first].ansible_host }}:9345
+          token: {{ hostvars[rke2_first].rke2_token }}
+
+    - name: Start rke2-agent
+      ansible.builtin.systemd:
+        name: rke2-agent
+        state: started
+        enabled: true
+        daemon_reload: true
+
+- name: Fetch kubeconfig to the control machine
+  hosts: master_nodes
+  gather_facts: false
+  run_once: true # only the first master is needed
+  vars:
+    kubeconfig_local: "{{ lookup('env', 'HOME') }}/.kube/homeserver.yaml"
+  tasks:
+    - name: Copy kubeconfig down
+      ansible.builtin.fetch:
+        src: /etc/rancher/rke2/rke2.yaml
+        dest: "{{ kubeconfig_local }}"
+        flat: true
+
+    - name: Point it at the master instead of 127.0.0.1
+      ansible.builtin.replace:
+        path: "{{ kubeconfig_local }}"
+        regexp: '127\.0\.0\.1'
+        replace: "{{ ansible_host }}"
+      delegate_to: localhost
+
+    - name: Restrict kubeconfig permissions
+      ansible.builtin.file:
+        path: "{{ kubeconfig_local }}"
+        mode: "0600"
+      delegate_to: localhost
+
+    - name: Show how to use it
+      ansible.builtin.debug:
+        msg: "export KUBECONFIG={{ kubeconfig_local }} && kubectl get nodes"

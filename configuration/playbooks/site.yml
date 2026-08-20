@@ -1,0 +1,9 @@
+---
+# Full build: OS prep, then RKE2.
+# Usage: ansible-playbook playbooks/site.yml
+
+- name: Prepare nodes
+  ansible.builtin.import_playbook: setup.yml
+
+- name: Install RKE2
+  ansible.builtin.import_playbook: rke2.yml
