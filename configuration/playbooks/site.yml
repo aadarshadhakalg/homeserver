@@ -1,9 +1,11 @@
 ---
-# Full build: OS prep, then RKE2.
-# Usage: ansible-playbook playbooks/site.yml
-
+# Full build: OS prep, then RKE2, then the database.
+# Usage: ansible-playbook playbooks/site.yml -e @secrets.yml --ask-vault-pass
 - name: Prepare nodes
   ansible.builtin.import_playbook: setup.yml
 
 - name: Install RKE2
   ansible.builtin.import_playbook: rke2.yml
+
+- name: Install PostgreSQL
+  ansible.builtin.import_playbook: postgresql.yml

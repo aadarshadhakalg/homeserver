@@ -52,3 +52,5 @@ terraform.rc
 
 # Python venv
 .venv/
+secrets.yml
+*.vault
