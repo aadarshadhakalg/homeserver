@@ -44,3 +44,11 @@ terraform.rc
 # planout
 
 .env
+# macOS
+.DS_Store
+
+# Ansible transient state
+.ansible/
+
+# Python venv
+.venv/

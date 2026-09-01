@@ -1,0 +1,10 @@
+---
+# Cloudflare terminates TLS at the edge and the tunnel itself is encrypted, so
+# argocd-server must not also serve TLS - double termination causes redirect
+# loops behind the ingress.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+data:
+  server.insecure: "true"

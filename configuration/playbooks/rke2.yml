@@ -18,7 +18,7 @@
     - name: Install RKE2 server
       ansible.builtin.command:
         cmd: /tmp/rke2-install.sh
-        creates: /usr/local/bin/rke2
+        creates: /usr/bin/rke2 # RPM install method on RHEL-family
       environment:
         INSTALL_RKE2_TYPE: server
         INSTALL_RKE2_VERSION: "{{ rke2_version }}"
@@ -95,7 +95,7 @@
     - name: Install RKE2 agent
       ansible.builtin.command:
         cmd: /tmp/rke2-install.sh
-        creates: /usr/local/bin/rke2
+        creates: /usr/bin/rke2 # RPM install method on RHEL-family
       environment:
         INSTALL_RKE2_TYPE: agent
         INSTALL_RKE2_VERSION: "{{ rke2_version }}"

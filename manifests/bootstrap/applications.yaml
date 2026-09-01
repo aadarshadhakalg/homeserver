@@ -1,0 +1,43 @@
+---
+# Applied once by hand; after this, Argo reconciles the repo - including itself.
+# Requires manifests/ to be committed and pushed to main.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/aadarshadhakalg/homeserver.git
+    targetRevision: main
+    path: manifests/argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # Argo's CRDs exceed the 262144-byte annotation limit of client-side apply.
+      - ServerSideApply=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudflared
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/aadarshadhakalg/homeserver.git
+    targetRevision: main
+    path: manifests/cloudflared
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cloudflare
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

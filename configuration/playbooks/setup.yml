@@ -49,3 +49,44 @@
         path: /etc/fstab
         regexp: '^([^#].*\sswap\s.*)$'
         replace: '# \1'
+
+- name: Kubernetes kernel prep
+  hosts: rke2_cluster
+  tasks:
+    - name: Install kernel modules package
+      ansible.builtin.dnf:
+        name: kernel-modules-extra # br_netfilter lives here on AlmaLinux 10
+        state: present
+
+    - name: Find newest installed kernel
+      ansible.builtin.command: rpm -q kernel --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n'
+      register: installed_kernels
+      changed_when: false
+
+    - name: Reboot into the newest kernel
+      # br_netfilter ships only with the newest kernel's modules; running an
+      # older kernel leaves the module missing and kube-proxy cannot program
+      # service rules, which wedges the CNI.
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+      when: ansible_kernel != (installed_kernels.stdout_lines | sort | last)
+
+    - name: Load kernel modules required by Kubernetes
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+        persistent: present
+      loop:
+        - overlay
+        - br_netfilter
+
+    - name: Set Kubernetes sysctls
+      ansible.posix.sysctl:
+        name: "{{ item }}"
+        value: "1"
+        sysctl_file: /etc/sysctl.d/99-kubernetes.conf
+        reload: true
+      loop:
+        - net.bridge.bridge-nf-call-iptables
+        - net.bridge.bridge-nf-call-ip6tables
+        - net.ipv4.ip_forward
