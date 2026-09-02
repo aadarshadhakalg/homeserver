@@ -50,10 +50,6 @@ spec:
           type: external
           external:
             addr: redis.redis.svc.cluster.local:6379
-            existingSecret: harbor-redis
-            # Redis 8 rejects the empty-username AUTH that redis://:pw@ produces,
-            # so the default user is named explicitly.
-            username: "default"
             # coreDatabaseIndex must stay 0; Harbor's client cannot configure it.
             # Beema was moved to index 9 to avoid sharing these.
             coreDatabaseIndex: "0"
