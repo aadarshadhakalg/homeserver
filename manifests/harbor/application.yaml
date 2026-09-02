@@ -26,6 +26,12 @@ spec:
               core: harbor.aadarshadhakal.com.np
         externalURL: https://harbor.aadarshadhakal.com.np
 
+        # The Cloudflare tunnel reaches ingress over HTTP. Relative upload URLs
+        # keep Docker on the public HTTPS origin instead of following an
+        # internal-scheme Location header and dropping its bearer token.
+        registry:
+          relativeurls: true
+
         persistence:
           persistentVolumeClaim:
             registry:
