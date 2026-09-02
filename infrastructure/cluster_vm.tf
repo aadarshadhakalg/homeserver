@@ -68,7 +68,12 @@ resource "proxmox_vm_qemu" "nodes" {
     model  = "virtio"
   }
 
-
+  lifecycle {
+    # The provider reports a startup_shutdown block it cannot actually remove,
+    # so every plan shows the same diff and every apply tries to reboot the
+    # guest for a no-op change. Ignoring it keeps applies convergent.
+    ignore_changes = [startup_shutdown]
+  }
 }
 
 output "vm_details" {

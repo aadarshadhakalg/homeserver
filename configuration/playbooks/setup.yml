@@ -24,6 +24,7 @@
           - curl
           - tar
           - chrony
+          - nfs-utils # every node must be able to mount NFS-backed PVCs
         state: present
 
     - name: Enable time sync (etcd is picky about clock skew)
