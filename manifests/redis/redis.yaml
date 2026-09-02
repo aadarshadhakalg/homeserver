@@ -24,25 +24,29 @@ spec:
       containers:
         - name: redis
           image: redis:8.8.2-alpine
-          # Celery broker and cache only: no RDB or AOF, so queued tasks do not
-          # survive a restart. Persisting to NFS would mean fsync over the
+          # Beema's Celery broker and cache. No RDB or AOF, so queued tasks do
+          # not survive a restart; persisting to NFS would mean fsync over the
           # network, which Redis handles badly.
-          #
-          # No requirepass: Harbor builds redis://:password@host, whose empty
-          # username Redis 8 rejects, and the chart offers no way to change it.
-          # Access is restricted by the NetworkPolicy below instead.
           args:
             - redis-server
+            - --requirepass
+            - $(REDIS_PASSWORD)
             - --save
             - ""
             - --appendonly
             - "no"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-auth
+                  key: password
           ports:
             - name: redis
               containerPort: 6379
           readinessProbe:
             exec:
-              command: [sh, -c, 'redis-cli ping']
+              command: [sh, -c, 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping']
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
@@ -76,7 +80,7 @@ spec:
       port: 6379
       targetPort: redis
 ---
-# Redis has no password, so this is the only thing gating access to it.
+# Defence in depth alongside the password: only Beema may reach it.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -92,9 +96,6 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: beema
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: harbor
       ports:
         - protocol: TCP
           port: 6379
