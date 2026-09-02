@@ -1,0 +1,78 @@
+---
+# Harbor from the upstream chart repo. Credentials come from Secrets created
+# out of band, so nothing sensitive lives in this public repo.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: harbor
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://helm.goharbor.io
+    chart: harbor
+    targetRevision: 1.19.2
+    helm:
+      values: |
+        expose:
+          type: ingress
+          # Cloudflare terminates TLS at the edge and the tunnel is encrypted,
+          # so Harbor serves plain HTTP inside the cluster.
+          tls:
+            enabled: false
+          ingress:
+            className: nginx
+            hosts:
+              core: harbor.aadarshadhakal.com.np
+        externalURL: https://harbor.aadarshadhakal.com.np
+
+        persistence:
+          persistentVolumeClaim:
+            registry:
+              storageClass: nfs
+              size: 30Gi
+            jobservice:
+              jobLog:
+                storageClass: nfs
+                size: 1Gi
+
+        database:
+          type: external
+          external:
+            host: 10.0.0.105
+            port: "5432"
+            username: harbor
+            coreDatabase: harbor
+            existingSecret: harbor-db
+            sslmode: disable
+
+        redis:
+          type: external
+          external:
+            addr: redis.redis.svc.cluster.local:6379
+            existingSecret: harbor-redis
+            # Redis 8 rejects the empty-username AUTH that redis://:pw@ produces,
+            # so the default user is named explicitly.
+            username: "default"
+            # coreDatabaseIndex must stay 0; Harbor's client cannot configure it.
+            # Beema was moved to index 9 to avoid sharing these.
+            coreDatabaseIndex: "0"
+            jobserviceDatabaseIndex: "1"
+            registryDatabaseIndex: "2"
+            trivyAdapterIndex: "5"
+
+        existingSecretAdminPassword: harbor-admin
+        existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
+
+        # Off for now: Trivy adds a scanner pod and a sizeable DB download.
+        trivy:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: harbor
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

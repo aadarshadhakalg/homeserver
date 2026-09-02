@@ -19,6 +19,7 @@
       - { name: homeserver, user: homeserver }
       - { name: beema_crm, user: beema_crm }
       - { name: beema_notifications, user: beema_notifications }
+      - { name: harbor, user: harbor }
   handlers:
     - name: Restart postgresql
       ansible.builtin.systemd:
