@@ -1,0 +1,43 @@
+---
+# NFS export backing the cluster's dynamic PVCs (media uploads, Harbor blobs).
+# Usage: ansible-playbook playbooks/nfs.yml
+
+- name: NFS server
+  hosts: storage_nodes
+  vars:
+    nfs_export: /srv/nfs
+    # Only the cluster subnet may mount; no_root_squash lets containers running
+    # as root own their subdirectories, which the provisioner needs.
+    nfs_allowed_cidr: 10.0.0.0/24
+  handlers:
+    - name: Reload exports
+      ansible.builtin.command: exportfs -ra
+      changed_when: true
+
+  tasks:
+    - name: Install NFS server
+      ansible.builtin.dnf:
+        name: nfs-utils
+        state: present
+
+    - name: Create the export directory
+      ansible.builtin.file:
+        path: "{{ nfs_export }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0777" # provisioner creates per-PVC subdirs owned by varied UIDs
+
+    - name: Write the export table
+      ansible.builtin.copy:
+        dest: /etc/exports
+        mode: "0644"
+        content: |
+          {{ nfs_export }} {{ nfs_allowed_cidr }}(rw,sync,no_subtree_check,no_root_squash)
+      notify: Reload exports
+
+    - name: Start the NFS server
+      ansible.builtin.systemd:
+        name: nfs-server
+        state: started
+        enabled: true

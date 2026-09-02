@@ -16,7 +16,7 @@ resource "proxmox_vm_qemu" "nodes" {
   clone  = "alma-cloudinit" # The name of the template
   scsihw = "virtio-scsi-single"
 
-  memory           = each.value.id > 2 ? 4096 : 2048
+  memory           = each.value.memory
   power_state      = "running"
   automatic_reboot = true
 
@@ -36,7 +36,7 @@ resource "proxmox_vm_qemu" "nodes" {
   }
 
   cpu {
-    cores   = each.value.id > 2 ? 4 : 2
+    cores   = each.value.cores
     sockets = 1
     type    = "host"
   }
@@ -48,7 +48,7 @@ resource "proxmox_vm_qemu" "nodes" {
         disk {
           storage = "local-lvm"
           # The size of the disk should be at least as big as the disk in the template. If it's smaller, the disk will be recreated
-          size = each.value.id > 2 ? "30G" : "20G"
+          size = each.value.disk
         }
       }
     }

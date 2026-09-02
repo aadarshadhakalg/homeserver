@@ -1,5 +1,5 @@
 ---
-# Full build: OS prep, then RKE2, then the database.
+# Full build: OS prep, RKE2, the database, then the NFS export.
 # Usage: ansible-playbook playbooks/site.yml -e @secrets.yml --ask-vault-pass
 - name: Prepare nodes
   ansible.builtin.import_playbook: setup.yml
@@ -9,3 +9,6 @@
 
 - name: Install PostgreSQL
   ansible.builtin.import_playbook: postgresql.yml
+
+- name: Install NFS server
+  ansible.builtin.import_playbook: nfs.yml

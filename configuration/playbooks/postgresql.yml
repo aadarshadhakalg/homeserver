@@ -1,17 +1,24 @@
 ---
 # PostgreSQL on the standalone database node.
-# The password must be supplied, e.g.:
+#
+# Each entry in postgresql_databases gets its own database, role and pg_hba
+# rule. Passwords are looked up by role name in postgresql_passwords, which
+# must be supplied out of band, e.g.:
 #   ansible-playbook playbooks/postgresql.yml -e @secrets.yml --ask-vault-pass
-# Usage: ansible-playbook playbooks/postgresql.yml
+#
+# Only roles present in postgresql_passwords are managed, so you can rotate or
+# add one database without touching the credentials of the others.
 
 - name: PostgreSQL server
   hosts: db
   vars:
-    postgresql_db: homeserver
-    postgresql_user: homeserver
     postgresql_data: /var/lib/pgsql/data
-    # Only this subnet may connect remotely; cluster pods egress via their node IP.
+    # Cluster pods reach the node IP because canal SNATs pod traffic.
     postgresql_allowed_cidr: 10.0.0.0/24
+    postgresql_databases:
+      - { name: homeserver, user: homeserver }
+      - { name: beema_crm, user: beema_crm }
+      - { name: beema_notifications, user: beema_notifications }
   handlers:
     - name: Restart postgresql
       ansible.builtin.systemd:
@@ -19,12 +26,20 @@
         state: restarted
 
   tasks:
-    - name: Require a database password
+    - name: Require at least one password
       ansible.builtin.assert:
-        that: postgresql_password is defined and postgresql_password | length > 0
+        that: postgresql_passwords is defined and postgresql_passwords | length > 0
         fail_msg: >-
-          postgresql_password is not set. Supply it with -e or a vaulted vars
-          file; this playbook will not create a passwordless account.
+          postgresql_passwords is not set. Supply a mapping of role name to
+          password with -e or a vaulted vars file; this playbook will not
+          create passwordless accounts.
+
+    - name: Select the databases whose passwords were supplied
+      ansible.builtin.set_fact:
+        postgresql_managed: >-
+          {{ postgresql_databases
+             | selectattr('user', 'in', postgresql_passwords.keys() | list)
+             | list }}
 
     - name: Install PostgreSQL
       ansible.builtin.dnf:
@@ -52,12 +67,14 @@
         group: postgres
         mode: "0600"
         content: |
-          # Managed by Ansible. Local admin over the unix socket, and the app
-          # user only, from the LAN only, with scram-sha-256.
+          # Managed by Ansible. Local admin over the unix socket; each app role
+          # reaches only its own database, from the LAN, with scram-sha-256.
           local   all             all                                     peer
           host    all             all             127.0.0.1/32            scram-sha-256
           host    all             all             ::1/128                 scram-sha-256
-          host    {{ postgresql_db }}  {{ postgresql_user }}  {{ postgresql_allowed_cidr }}  scram-sha-256
+          {% for d in postgresql_databases %}
+          host    {{ d.name }}  {{ d.user }}  {{ postgresql_allowed_cidr }}  scram-sha-256
+          {% endfor %}
       notify: Restart postgresql
 
     - name: Start PostgreSQL
@@ -69,29 +86,52 @@
     - name: Apply any pending config changes before using the database
       ansible.builtin.meta: flush_handlers
 
-    - name: Create the application database
+    - name: Create the application databases
       community.postgresql.postgresql_db:
-        name: "{{ postgresql_db }}"
+        name: "{{ item.name }}"
         state: present
+      loop: "{{ postgresql_managed }}"
+      loop_control:
+        label: "{{ item.name }}"
       become: true
       become_user: postgres
 
-    - name: Create the application user
+    - name: Create the application roles
       community.postgresql.postgresql_user:
-        login_db: "{{ postgresql_db }}"
-        name: "{{ postgresql_user }}"
-        password: "{{ postgresql_password }}"
+        login_db: "{{ item.name }}"
+        name: "{{ item.user }}"
+        password: "{{ postgresql_passwords[item.user] }}"
         state: present
+      loop: "{{ postgresql_managed }}"
+      loop_control:
+        label: "{{ item.user }}"
       become: true
       become_user: postgres
-      no_log: true # keep the password out of the log
+      no_log: true # keep passwords out of the log
 
-    - name: Grant the user access to the database
+    - name: Grant each role access to its database
       community.postgresql.postgresql_privs:
-        db: "{{ postgresql_db }}"
-        role: "{{ postgresql_user }}"
+        db: "{{ item.name }}"
+        role: "{{ item.user }}"
         type: database
         privs: ALL
         state: present
+      loop: "{{ postgresql_managed }}"
+      loop_control:
+        label: "{{ item.name }}"
+      become: true
+      become_user: postgres
+
+    - name: Grant schema ownership so migrations can create tables
+      community.postgresql.postgresql_privs:
+        db: "{{ item.name }}"
+        role: "{{ item.user }}"
+        type: schema
+        objs: public
+        privs: ALL
+        state: present
+      loop: "{{ postgresql_managed }}"
+      loop_control:
+        label: "{{ item.name }}"
       become: true
       become_user: postgres
