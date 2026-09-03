@@ -56,5 +56,8 @@ spec:
     server: https://kubernetes.default.svc
     namespace: beema
   syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - CreateNamespace=true
