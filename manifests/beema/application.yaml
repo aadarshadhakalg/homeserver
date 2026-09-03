@@ -1,0 +1,60 @@
+---
+# Beema CRM. The chart lives in a private repo, so Argo needs repository
+# credentials registered for autoversehq/beema-deployments.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: beema
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/autoversehq/beema-deployments.git
+    targetRevision: main
+    path: charts/beema
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-production.yaml
+      values: |
+        imagePullSecrets:
+          - name: beema-pull
+
+        api:
+          image:
+            repository: harbor.aadarshadhakal.com.np/beema/api
+            tag: sha-2c29675f478a73c3b8b7912051e62f8590c3b90e
+        web:
+          image:
+            repository: harbor.aadarshadhakal.com.np/beema/web
+            tag: sha-d0d443b8eb80936533d0059e860c2462c14d7a39
+        notifications:
+          image:
+            repository: harbor.aadarshadhakal.com.np/beema/notifications
+            tag: sha-46eb7575092659b80cad51e9341b453d4effc396
+
+        media:
+          storageClass: nfs
+          accessModes:
+            - ReadWriteMany
+
+        ingress:
+          # Cloudflare terminates TLS at the edge, so cert-manager is not
+          # involved and the chart must not request a certificate.
+          annotations: {}
+          tls:
+            enabled: false
+
+        networkPolicy:
+          # RKE2 runs ingress-nginx in kube-system, not in an ingress-nginx
+          # namespace. Without this the policies drop all ingress traffic while
+          # every pod still reports healthy.
+          ingressNamespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: beema
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
