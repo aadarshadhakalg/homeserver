@@ -1,0 +1,21 @@
+---
+# Declared here rather than left as UI-only drift. Restricts the Beema
+# application to its own chart repo and namespace, so a mistake in the chart
+# cannot deploy into kube-system or pull from an unexpected source.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: beema-crm
+spec:
+  description: Beema CRM platform
+  sourceRepos:
+    - https://github.com/autoversehq/beema-deployments.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: beema
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

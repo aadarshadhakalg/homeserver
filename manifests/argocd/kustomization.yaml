@@ -7,5 +7,6 @@ resources:
   # Pinned deliberately: upgrades are a commit here, not a surprise from upstream.
   - https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.2/manifests/install.yaml
   - ingress.yaml
+  - project-beema.yaml
 patches:
   - path: insecure.yaml
