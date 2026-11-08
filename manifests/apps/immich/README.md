@@ -3,8 +3,8 @@
 Self-hosted photo and video library, deployed from the upstream Helm chart
 (`immich/immich`, pinned in `application.yaml`).
 
-    manifests/immich/application.yaml   two Argo Applications: resources, then the release
-    manifests/immich/resources/         Postgres + the library PVC, owned outside the release
+    manifests/apps/immich/application.yaml   two Argo Applications: resources, then the release
+    manifests/apps/immich/resources/         Postgres + the library PVC, owned outside the release
 
 The chart deliberately ships **no database** and **will not create the library
 volume**, so both live in `resources/`. Keeping them out of the release means a
@@ -24,7 +24,10 @@ cannot take the photos or the database with it.
 
 2. Register the Applications with Argo:
 
-       kubectl apply -f manifests/immich/application.yaml
+       kubectl apply -f manifests/apps/immich/application.yaml
+
+   Or, now that the Secret exists, drop `immich/*` from the `exclude` in
+   `manifests/all_apps.yaml` and let app-of-apps register them on push.
 
    `immich-resources` brings up Postgres and the library claim;
    `immich` syncs the chart. The server crash-loops until Postgres finishes

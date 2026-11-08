@@ -33,7 +33,7 @@ There is no build or test suite. Validation is done with each tool's own checks 
 **Kubernetes**
 
     export KUBECONFIG=~/.kube/homeserver.yaml
-    kubectl kustomize manifests/argocd                  # render Argo's self-managed install
+    kubectl kustomize manifests/apps/argocd/resources   # render Argo's self-managed install
     kubectl apply --dry-run=server -f <manifest>        # validate against the live API
     kubectl -n argocd get applications
 
@@ -43,17 +43,18 @@ There is no build or test suite. Validation is done with each tool's own checks 
 
 VM IDs and IPs (`10.0.0.100`–`106`) are defined in both `infrastructure/data.tf` (`locals.vms`) and `configuration/hosts.ini`. Keep the two in sync. Two IPs are also hard-coded in manifests:
 - `10.0.0.105`: the external PostgreSQL in Harbor's values.
-- `10.0.0.106:/srv/nfs`: the NFS server in `manifests/storage/`.
+- `10.0.0.106:/srv/nfs`: the NFS server in `manifests/apps/storage/resources/`.
 
 Inventory groups: `master_nodes`, `worker_nodes`, `rke2_cluster` (both), `db`, `storage_nodes`. `storage_nodes` is named that way so it doesn't collide with the host called `storage`. Kubernetes-only kernel prep targets `rke2_cluster`, so the database and storage nodes don't get it.
 
 ### How manifests reach the cluster
 
-- Argo CD manages itself. `manifests/argocd/` is a kustomization of the upstream `install.yaml` (pinned version), plus an ingress, the `server.insecure` patch and the AppProjects.
-- `manifests/bootstrap/applications.yaml` was applied once by hand. It defines the `argocd`, `cloudflared`, `nfs-provisioner` and `redis` Applications, each pointing at a path in this repo on `main`. Changes under those paths take effect only after a push to `main`, because Argo reads from GitHub, not from the working tree.
-- `manifests/{harbor,beema,immich}/application.yaml` are **not** referenced by any tracked Application. They are registered with `kubectl apply -f`, so editing one (for example, bumping a Beema image tag) does nothing until it is re-applied. The same goes for adding an Application to the bootstrap file.
+- App of apps. `manifests/all_apps.yaml` (`app-of-apps`) is the only manifest applied by hand. It renders every `manifests/apps/*/application.yaml` except Beema's and Immich's and nothing else, so adding an app means adding a folder with an `application.yaml`. Changes to those files, and under the paths they point at, take effect only after a push to `main`, because Argo reads from GitHub, not from the working tree. Changes to `all_apps.yaml` itself must be re-applied with `kubectl apply -f`.
+- An app's own manifests live in `<app>/resources/`, and its Application points there, never at its own folder. A directory source pointed at the folder would also render the `application.yaml` that `app-of-apps` owns, and the two would fight over it.
+- Argo CD manages itself. The `argocd` Application syncs `manifests/apps/argocd/resources/`, a kustomization of the upstream `install.yaml` (pinned version), plus an ingress, the `server.insecure` patch and the AppProjects.
+- Beema and Immich are in the parent's `exclude` and are registered with `kubectl apply -f`, so editing their `application.yaml` (for example, bumping a Beema image tag) does nothing until it is re-applied. Beema's live image tags were set outside Git: write them into the file before taking Beema out of `exclude`, or self-heal rolls them back. Immich needs its `immich-db` Secret before its first sync.
 - Third-party apps come from upstream Helm repos, with values inline in the Application. Beema's chart comes from the private `autoversehq/beema-deployments` repo, and an Alembic migration runs as a PreSync hook on every sync.
-- Declare AppProjects in `manifests/argocd/` (as `project-beema.yaml` does) rather than creating them in the UI, where they escape self-management. The cluster also runs a `campinnepal` app and project that are not declared in this repo.
+- Declare AppProjects in `manifests/apps/argocd/resources/` (as `project-beema.yaml` does) rather than creating them in the UI, where they escape self-management. The cluster also runs a `campinnepal` app and project that are not declared in this repo.
 
 ### Ingress and TLS
 
@@ -75,12 +76,12 @@ Cloudflare's free plan caps request bodies at 100 MB and proxies only HTTP and W
   - add an entry to `postgresql_databases` in `postgresql.yml`;
   - add its password to `secrets.yml`;
   - re-run the playbook. Only roles whose passwords are supplied are touched, and each role may reach only its own database from `10.0.0.0/24` (canal SNATs pod traffic to the node IP).
-- Immich is the exception. It needs VectorChord, so it runs its own Postgres from `manifests/immich/resources/`, a separate Application so that a chart change or delete can't take the data with it.
+- Immich is the exception. It needs VectorChord, so it runs its own Postgres from `manifests/apps/immich/resources/`, a separate Application so that a chart change or delete can't take the data with it.
 - The shared Redis in the `redis` namespace belongs to Beema (password auth, NetworkPolicy limited to the `beema` namespace). Harbor and Immich use chart-managed instances. Harbor forces DB index 0 and builds a `redis://:password@` URL, whose empty username Redis 8 rejects.
 
 ### Secrets
 
-The repo is public. Kubernetes Secrets are created out of band with `kubectl create secret`. The manifests reference `cloudflared-token`, `redis-auth`, `harbor-db`, `harbor-admin`, `immich-db` and `beema-pull`. Per-component setup steps, including secret creation, are in that component's README (`manifests/cloudflared/README.md`, `manifests/immich/README.md`).
+The repo is public. Kubernetes Secrets are created out of band with `kubectl create secret`. The manifests reference `cloudflared-token`, `redis-auth`, `harbor-db`, `harbor-admin`, `immich-db` and `beema-pull`. Per-component setup steps, including secret creation, are in that component's README (`manifests/apps/cloudflared/README.md`, `manifests/apps/immich/README.md`).
 
 ## Conventions
 

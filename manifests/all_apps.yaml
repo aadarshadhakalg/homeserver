@@ -1,20 +1,33 @@
 ---
+# The root Application and the only manifest applied by hand. Edits here need
+# re-applying; edits to the Applications it finds take effect on push to main.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: app-of-apps
   namespace: argocd
 spec:
-  project:
+  project: default
   source:
-    repoURL: git@github.com:aadarshadhakalg/homeserver.git
-    targetRevision: HEAD
+    repoURL: https://github.com/aadarshadhakalg/homeserver.git
+    targetRevision: main
     path: manifests/apps
+    directory:
+      recurse: true
+      # Application definitions only. Each app's own manifests sit in its
+      # resources/ folder, outside this pattern, so nothing has two owners.
+      include: '*/application.yaml'
+      # Still registered by hand with kubectl apply. Beema's live image tags
+      # were set outside Git and self-heal would roll them back; Immich needs
+      # its immich-db Secret before the first sync.
+      exclude: '{beema/*,immich/*}'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
   syncPolicy:
     automated:
+      # Removing an application.yaml deletes that Application. None carry the
+      # resources finalizer, so the workloads it deployed keep running.
       prune: true
       selfHeal: true
     syncOptions:
