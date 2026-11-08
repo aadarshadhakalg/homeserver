@@ -1,0 +1,21 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudflared
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/aadarshadhakalg/homeserver.git
+    targetRevision: main
+    # resources/, not this folder: a directory source here would also render
+    # this file, which app-of-apps owns, and the two would fight over it.
+    path: manifests/apps/cloudflared/resources
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cloudflare
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

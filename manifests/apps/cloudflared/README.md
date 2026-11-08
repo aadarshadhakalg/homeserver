@@ -20,7 +20,7 @@ changing public IP is irrelevant.
 
 3. Apply:
 
-       kubectl apply -f manifests/cloudflared/cloudflared.yaml
+       kubectl apply -f manifests/apps/cloudflared/resources/cloudflared.yaml
        kubectl -n cloudflare rollout status deploy/cloudflared
 
 4. In the dashboard, add **one** public hostname routing everything at the
