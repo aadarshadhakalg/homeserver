@@ -1,0 +1,113 @@
+---
+# Immich needs a PostgreSQL carrying the VectorChord extension for its smart
+# search index, which the plain postgresql-server on the database node does not
+# have. Upstream ships a purpose-built image, so Immich gets its own instance
+# in-cluster rather than forcing an extension build onto the shared server.
+#
+# The data directory lives on NFS. Postgres over NFS is a compromise - it is the
+# only storage class this cluster has - and it is acceptable here because the
+# export is hard-mounted with no_root_squash and this database holds derivable
+# metadata rather than the photos themselves.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-postgres
+  namespace: immich
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nfs
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-postgres
+  namespace: immich
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # one writer only; never two pods on the same data directory
+  selector:
+    matchLabels:
+      app: immich-postgres
+  template:
+    metadata:
+      labels:
+        app: immich-postgres
+    spec:
+      containers:
+        - name: postgres
+          # Matches the tag in upstream's docker-compose: Postgres 14 with
+          # VectorChord and pgvecto.rs preinstalled. Bump deliberately, and read
+          # Immich's release notes first - a vector extension major is a reindex.
+          image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
+          env:
+            - name: POSTGRES_USER
+              value: immich
+            - name: POSTGRES_DB
+              value: immich
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: immich-db
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_INITDB_ARGS
+              value: --data-checksums
+            # The volume root is created by the NFS provisioner and owned by
+            # root; initdb insists on an empty directory it owns, so give it a
+            # subdirectory of its own.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            # Tunes VectorChord for spinning rust. NFS round trips put latency
+            # in the same class, so treat the store as HDD regardless of the
+            # disks behind the export.
+            - name: DB_STORAGE_TYPE
+              value: HDD
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, immich, -d, immich]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: postgres
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: immich-postgres
+        - name: shm
+          # Default /dev/shm is 64Mi; Postgres parallel workers need more.
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-postgres
+  namespace: immich
+spec:
+  selector:
+    app: immich-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

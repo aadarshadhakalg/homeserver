@@ -1,0 +1,18 @@
+---
+# The photo library, shared by the server and its background workers. The chart
+# will not create this - it only accepts an existing claim - so it is declared
+# here and deliberately outlives an uninstall of the release.
+#
+# ReadWriteMany because more than one Immich pod mounts it; the NFS class
+# ignores the requested size, so this number is a budget, not a quota.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-library
+  namespace: immich
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nfs
+  resources:
+    requests:
+      storage: 500Gi

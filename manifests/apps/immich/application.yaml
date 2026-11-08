@@ -1,0 +1,134 @@
+---
+# Supporting objects the chart cannot own: the Postgres instance and the library
+# claim. Split from the release so that deleting or re-templating Immich never
+# takes the photos or the database with it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: immich-resources
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/aadarshadhakalg/homeserver.git
+    targetRevision: main
+    path: manifests/immich/resources
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: immich
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+# Immich from the upstream chart repo. The chart ships no database, so the
+# connection details point at the instance declared alongside it and the
+# password comes from a Secret created out of band.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: immich
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://immich-app.github.io/immich-charts
+    chart: immich
+    targetRevision: 0.12.0
+    helm:
+      values: |
+        immich:
+          persistence:
+            library:
+              existingClaim: immich-library
+
+        # Shared by the server and machine-learning deployments.
+        controllers:
+          main:
+            containers:
+              main:
+                env:
+                  DB_HOSTNAME: immich-postgres
+                  DB_USERNAME: immich
+                  DB_DATABASE_NAME: immich
+                  DB_PASSWORD:
+                    valueFrom:
+                      secretKeyRef:
+                        name: immich-db
+                        key: DB_PASSWORD
+
+        valkey:
+          # Chart-managed rather than the shared Redis: Immich expects a whole
+          # instance to itself and the shared one is password-protected and
+          # firewalled to Beema.
+          enabled: true
+          persistence:
+            data:
+              # Queues only. They rebuild on restart, and Redis-style fsync over
+              # NFS is a bad trade.
+              type: emptyDir
+
+        server:
+          ingress:
+            main:
+              enabled: true
+              className: nginx
+              annotations:
+                # Uploads are whole-file PUTs; nginx must not cap or buffer them.
+                nginx.ingress.kubernetes.io/proxy-body-size: "0"
+                nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+                nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+                nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+              hosts:
+                - host: immich.aadarshadhakal.com.np
+                  paths:
+                    - path: /
+                      service:
+                        identifier: main
+              # Cloudflare terminates TLS at the edge, so no certificate here.
+              tls: []
+          controllers:
+            main:
+              containers:
+                main:
+                  resources:
+                    requests:
+                      cpu: 100m
+                      memory: 512Mi
+                    limits:
+                      # Transcoding and thumbnail generation spike well above
+                      # the idle footprint.
+                      memory: 4Gi
+
+        machine-learning:
+          persistence:
+            cache:
+              # Persisted so the CLIP and face-recognition models are downloaded
+              # once rather than on every pod restart.
+              type: persistentVolumeClaim
+              accessMode: ReadWriteMany
+              storageClass: nfs
+              size: 10Gi
+          controllers:
+            main:
+              containers:
+                main:
+                  resources:
+                    requests:
+                      cpu: 100m
+                      memory: 1Gi
+                    limits:
+                      # CPU inference; the models are held in memory while a
+                      # job runs.
+                      memory: 4Gi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: immich
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
