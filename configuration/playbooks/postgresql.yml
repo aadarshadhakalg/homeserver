@@ -17,8 +17,6 @@
     postgresql_allowed_cidr: 10.0.0.0/24
     postgresql_databases:
       - { name: homeserver, user: homeserver }
-      - { name: beema_crm, user: beema_crm }
-      - { name: beema_notifications, user: beema_notifications }
       - { name: harbor, user: harbor }
   handlers:
     - name: Restart postgresql

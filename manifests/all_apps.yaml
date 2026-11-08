@@ -17,10 +17,6 @@ spec:
       # Application definitions only. Each app's own manifests sit in its
       # resources/ folder, outside this pattern, so nothing has two owners.
       include: '*/application.yaml'
-      # Still registered by hand with kubectl apply. Beema's live image tags
-      # were set outside Git and self-heal would roll them back; Immich needs
-      # its immich-db Secret before the first sync.
-      exclude: '{beema/*,immich/*}'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
