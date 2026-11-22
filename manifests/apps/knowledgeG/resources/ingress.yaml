@@ -1,0 +1,33 @@
+---
+# One host for both: /mcp is the MCP server, everything else the web console.
+# No rewrite, because the MCP server ignores the path and the console has no
+# route under /mcp.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: falkordb
+  namespace: falkordb
+  annotations:
+    # MCP and the console's query API both stream SSE; nginx buffering would
+    # hold responses back until they end.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: falkor.aadarshadhakal.com.np
+      http:
+        paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: falkordb-mcp
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: falkordb-browser
+                port:
+                  number: 3000

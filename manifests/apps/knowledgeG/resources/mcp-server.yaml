@@ -78,31 +78,6 @@ spec:
     - port: 8080
       targetPort: http
 ---
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: falkordb-mcp
-  namespace: falkordb
-  labels:
-    app.kubernetes.io/name: falkordb-mcp
-  annotations:
-    # MCP streams responses as SSE; nginx buffering would hold them back
-    # until the response ends.
-    nginx.ingress.kubernetes.io/proxy-buffering: "off"
-spec:
-  ingressClassName: nginx
-  rules:
-    - host: falkordb-mcp.aadarshadhakal.com.np
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: falkordb-mcp
-                port:
-                  number: 8080
----
 # RKE2 runs ingress-nginx in kube-system; selecting an "ingress-nginx"
 # namespace would drop all traffic while the pod still reports healthy.
 apiVersion: networking.k8s.io/v1

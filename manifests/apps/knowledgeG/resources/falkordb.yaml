@@ -113,11 +113,12 @@ spec:
       port: 6379
       targetPort: falkordb
 ---
-# Defence in depth alongside the password: only the MCP server may reach it.
+# Defence in depth alongside the password: only the MCP server and the web
+# console may reach it.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: falkordb-allow-mcp
+  name: falkordb-allow-consumers
   namespace: falkordb
 spec:
   podSelector:
@@ -129,6 +130,9 @@ spec:
         - podSelector:
             matchLabels:
               app: falkordb-mcp
+        - podSelector:
+            matchLabels:
+              app: falkordb-browser
       ports:
         - protocol: TCP
           port: 6379
