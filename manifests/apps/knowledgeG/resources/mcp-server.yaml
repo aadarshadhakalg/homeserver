@@ -1,0 +1,125 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: falkordb-mcp
+  namespace: falkordb
+spec:
+  # Sessions live in process memory, so two pods would reject each other's,
+  # even briefly during a rolling update.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: falkordb-mcp
+  template:
+    metadata:
+      labels:
+        app: falkordb-mcp
+    spec:
+      containers:
+        - name: falkordb-mcp
+          image: falkordb/mcpserver:1.3.0
+          env:
+            - name: MCP_TRANSPORT
+              value: http # default is stdio, which only works when the client launches the process itself
+            - name: MCP_PORT
+              value: "8080"
+            - name: FALKORDB_HOST
+              value: falkordb
+            # Must stay explicit: the falkordb Service otherwise injects
+            # FALKORDB_PORT=tcp://<ip>:6379, which isn't a port number.
+            - name: FALKORDB_PORT
+              value: "6379"
+            - name: FALKORDB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: falkordb-auth, key: password }
+            - name: MCP_API_KEY
+              valueFrom:
+                secretKeyRef: { name: falkordb-mcp, key: api-key } # without this, anyone who finds the URL gets in
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          ports:
+            - name: http
+              containerPort: 8080
+          # TCP, because any HTTP request without the API key gets a 401.
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            # The port opens only once FalkorDB answers, and the server retries
+            # that for about 100s before giving up.
+            initialDelaySeconds: 120
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000 # the image's node user; it defaults to root
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falkordb-mcp
+  namespace: falkordb
+spec:
+  selector:
+    app: falkordb-mcp
+  ports:
+    - port: 8080
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: falkordb-mcp
+  namespace: falkordb
+  labels:
+    app.kubernetes.io/name: falkordb-mcp
+  annotations:
+    # MCP streams responses as SSE; nginx buffering would hold them back
+    # until the response ends.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: falkordb-mcp.aadarshadhakal.com.np
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: falkordb-mcp
+                port:
+                  number: 8080
+---
+# RKE2 runs ingress-nginx in kube-system; selecting an "ingress-nginx"
+# namespace would drop all traffic while the pod still reports healthy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: falkordb-mcp-allow-ingress
+  namespace: falkordb
+spec:
+  podSelector:
+    matchLabels:
+      app: falkordb-mcp
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: 8080

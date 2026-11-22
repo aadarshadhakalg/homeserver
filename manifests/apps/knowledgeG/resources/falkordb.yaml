@@ -1,0 +1,134 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falkordb
+  annotations:
+    # Pruning the namespace would delete the PVC in it, whatever the PVC's own
+    # annotation says.
+    argocd.argoproj.io/sync-options: Prune=false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: falkordb-data
+  namespace: falkordb
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  resources:
+    requests:
+      storage: 2Gi
+  volumeMode: Filesystem
+  storageClassName: nfs
+  accessModes:
+    - ReadWriteOnce
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: falkordb
+  namespace: falkordb
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: falkordb
+  template:
+    metadata:
+      labels:
+        app: falkordb
+    spec:
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: falkordb-data
+      containers:
+        - name: falkordb
+          image: falkordb/falkordb:6.0.4
+          env:
+            - name: FALKORDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: falkordb-auth
+                  key: password
+            # Unlike Beema's Redis, the data here is the point, so RDB snapshots
+            # stay on. A snapshot is one file write and a rename, which NFS
+            # handles; AOF's continuous fsync is what it handles badly.
+            - name: REDIS_ARGS
+              value: "--requirepass $(FALKORDB_PASSWORD) --save 60 1 --appendonly no"
+            # The bundled browser needs root to switch users.
+            - name: BROWSER
+              value: "0"
+          ports:
+            - name: falkordb
+              containerPort: 6379
+          readinessProbe:
+            # $VAR, not $(VAR): the kubelet expands the latter to "" for values
+            # from Secrets. grep, because redis-cli exits 0 when auth fails.
+            exec:
+              command:
+                [
+                  sh,
+                  -c,
+                  'redis-cli -a "$FALKORDB_PASSWORD" --no-auth-warning ping | grep -q PONG',
+                ]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: falkordb
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 999
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/falkordb/data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falkordb
+  namespace: falkordb
+spec:
+  selector:
+    app: falkordb
+  ports:
+    - name: falkordb
+      port: 6379
+      targetPort: falkordb
+---
+# Defence in depth alongside the password: only the MCP server may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: falkordb-allow-mcp
+  namespace: falkordb
+spec:
+  podSelector:
+    matchLabels:
+      app: falkordb
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: falkordb-mcp
+      ports:
+        - protocol: TCP
+          port: 6379
