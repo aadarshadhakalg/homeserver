@@ -55,7 +55,7 @@ spec:
                 secretKeyRef:
                   name: falkordb-auth
                   key: password
-            # Unlike Beema's Redis, the data here is the point, so RDB snapshots
+            # Unlike the shared Redis, the data here is the point, so RDB snapshots
             # stay on. A snapshot is one file write and a rename, which NFS
             # handles; AOF's continuous fsync is what it handles badly.
             - name: REDIS_ARGS

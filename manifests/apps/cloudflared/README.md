@@ -31,8 +31,9 @@ changing public IP is irrelevant.
    | Hostname | `*.example.com`                                                |
    | Service  | `http://ingress-nginx-internal.kube-system.svc.cluster.local:80` |
 
-5. Expose an app with an ordinary Ingress plus a CNAME to
-   `<tunnel-id>.cfargotunnel.com`.
+5. Make sure a proxied wildcard `*` CNAME points to
+   `<tunnel-id>.cfargotunnel.com`. An app then needs only an ordinary Ingress,
+   and is public as soon as that Ingress exists.
 
 ## Notes
 

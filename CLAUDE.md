@@ -49,18 +49,15 @@ Inventory groups: `master_nodes`, `worker_nodes`, `rke2_cluster` (both), `db`, `
 
 ### How manifests reach the cluster
 
-- App of apps. `manifests/all_apps.yaml` (`app-of-apps`) is the only manifest applied by hand. It renders every `manifests/apps/*/application.yaml` except Beema's and Immich's and nothing else, so adding an app means adding a folder with an `application.yaml`. Changes to those files, and under the paths they point at, take effect only after a push to `main`, because Argo reads from GitHub, not from the working tree. Changes to `all_apps.yaml` itself must be re-applied with `kubectl apply -f`.
+- App of apps. `manifests/all_apps.yaml` (`app-of-apps`) is the only manifest applied by hand. It renders every `manifests/apps/*/application.yaml` and nothing else, so adding an app means adding a folder with an `application.yaml`. Changes to those files, and under the paths they point at, take effect only after a push to `main`, because Argo reads from GitHub, not from the working tree. Changes to `all_apps.yaml` itself must be re-applied with `kubectl apply -f`.
 - An app's own manifests live in `<app>/resources/`, and its Application points there, never at its own folder. A directory source pointed at the folder would also render the `application.yaml` that `app-of-apps` owns, and the two would fight over it.
-- Argo CD manages itself. The `argocd` Application syncs `manifests/apps/argocd/resources/`, a kustomization of the upstream `install.yaml` (pinned version), plus an ingress, the `server.insecure` patch and the AppProjects.
-- Beema and Immich are in the parent's `exclude` and are registered with `kubectl apply -f`, so editing their `application.yaml` (for example, bumping a Beema image tag) does nothing until it is re-applied. Beema's live image tags were set outside Git: write them into the file before taking Beema out of `exclude`, or self-heal rolls them back. Immich needs its `immich-db` Secret before its first sync.
-- Third-party apps come from upstream Helm repos, with values inline in the Application. Beema's chart comes from the private `autoversehq/beema-deployments` repo, and an Alembic migration runs as a PreSync hook on every sync.
-- Declare AppProjects in `manifests/apps/argocd/resources/` (as `project-beema.yaml` does) rather than creating them in the UI, where they escape self-management. The cluster also runs a `campinnepal` app and project that are not declared in this repo.
+- Argo CD manages itself. The `argocd` Application syncs `manifests/apps/argocd/resources/`, a kustomization of the upstream `install.yaml` (pinned version), plus an ingress and the `server.insecure` patch.
+- Third-party apps come from upstream Helm repos, with values inline in the Application.
+- Declare AppProjects in `manifests/apps/argocd/resources/` and list them in its `kustomization.yaml`, rather than creating them in the UI, where they escape self-management. The cluster also runs a `campinnepal` app and project that are not declared in this repo.
 
 ### Ingress and TLS
 
-The request path is: Cloudflare edge → tunnel → `cloudflared` Deployment → `ingress-nginx-internal` Service (kube-system) → Ingress. Cloudflare routes a wildcard hostname at ingress-nginx, so exposing a new app needs only:
-- an Ingress with `className: nginx`;
-- a CNAME from `<name>.aadarshadhakal.com.np` to `<tunnel-id>.cfargotunnel.com`.
+The request path is: Cloudflare edge → tunnel → `cloudflared` Deployment → `ingress-nginx-internal` Service (kube-system) → Ingress. DNS and the tunnel both route `*.aadarshadhakal.com.np` to ingress-nginx, so exposing a new app needs only an Ingress with `className: nginx`, with no DNS change. It also means an Ingress is on the public internet as soon as Argo syncs it, so any access control must be in place before the push.
 
 Cloudflare terminates TLS. There is no cert-manager, Ingress TLS is disabled, and apps serve plain HTTP inside the cluster (Argo `server.insecure`, Harbor `expose.tls.enabled: false`). Serving TLS inside the cluster as well causes redirect loops.
 
@@ -71,20 +68,23 @@ Cloudflare's free plan caps request bodies at 100 MB and proxies only HTTP and W
 ### Storage and data services
 
 - `nfs` is the only StorageClass and the default (nfs-subdir-external-provisioner on `storage:/srv/nfs`). It supports ReadWriteMany but doesn't enforce requested sizes. `archiveOnDelete` keeps the data when a PVC is deleted.
-- Avoid fsync-heavy persistence over NFS. Redis and Valkey run with no RDB or AOF, or on `emptyDir`.
+- Avoid fsync-heavy persistence over NFS. The shared Redis runs with no RDB or AOF. FalkorDB is the exception: its data is the point, so it keeps RDB snapshots on NFS (`--save 60 1`, one file write and a rename), still without AOF.
+- FalkorDB (`manifests/apps/knowledgeG/`, app and namespace `falkordb`) is the Claude Code knowledge graph. `falkor.aadarshadhakal.com.np` serves the MCP server at `/mcp` and the web console at everything else.
+  - The MCP server and console keep sessions in the pod, so both stay at one replica with `Recreate`.
+  - The console connects to any host typed into its login form. Keep its egress NetworkPolicy, and never give it the database password, because auto-connect would sign every visitor in.
+  - The MCP server doesn't log to stdout. Debug it with `kubectl describe pod`, not `kubectl logs`.
 - Shared PostgreSQL runs on the `database` VM, not in the cluster. To add an app database:
   - add an entry to `postgresql_databases` in `postgresql.yml`;
   - add its password to `secrets.yml`;
   - re-run the playbook. Only roles whose passwords are supplied are touched, and each role may reach only its own database from `10.0.0.0/24` (canal SNATs pod traffic to the node IP).
-- Immich is the exception. It needs VectorChord, so it runs its own Postgres from `manifests/apps/immich/resources/`, a separate Application so that a chart change or delete can't take the data with it.
-- The shared Redis in the `redis` namespace belongs to Beema (password auth, NetworkPolicy limited to the `beema` namespace). Harbor and Immich use chart-managed instances. Harbor forces DB index 0 and builds a `redis://:password@` URL, whose empty username Redis 8 rejects.
+- The shared Redis in the `redis` namespace (password auth) currently has no consumers: its NetworkPolicy admits only a namespace that no longer exists, so a new consumer must be added there. Harbor uses a chart-managed instance. Harbor forces DB index 0 and builds a `redis://:password@` URL, whose empty username Redis 8 rejects.
 
 ### Secrets
 
-The repo is public. Kubernetes Secrets are created out of band with `kubectl create secret`. The manifests reference `cloudflared-token`, `redis-auth`, `harbor-db`, `harbor-admin`, `immich-db` and `beema-pull`. Per-component setup steps, including secret creation, are in that component's README (`manifests/apps/cloudflared/README.md`, `manifests/apps/immich/README.md`).
+The repo is public. Kubernetes Secrets are created out of band with `kubectl create secret`. The manifests reference `cloudflared-token`, `redis-auth`, `harbor-db`, `harbor-admin`, `falkordb-auth` (key `password`) and `falkordb-mcp` (key `api-key`; an empty value turns MCP auth off). Setup steps for the tunnel, including its Secret, are in `manifests/apps/cloudflared/README.md`.
 
 ## Conventions
 
-- Pin every version: image tags, chart versions, the Argo install URL, and `cloudflared --no-autoupdate`. Beema images use immutable `sha-` tags from `harbor.aadarshadhakal.com.np`. Upgrades are deliberate commits.
+- Pin every version: image tags, chart versions, the Argo install URL, and `cloudflared --no-autoupdate`. Upgrades are deliberate commits.
 - Comments explain *why*: the constraint or failure mode behind a setting. New config should follow suit.
 - Commit messages have an imperative, sentence-case subject. The body explains the reasoning, especially the failure that motivated the change.
