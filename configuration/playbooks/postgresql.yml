@@ -18,6 +18,7 @@
     postgresql_databases:
       - { name: homeserver, user: homeserver }
       - { name: harbor, user: harbor }
+      - { name: vlogs, user: vlogs }
   handlers:
     - name: Restart postgresql
       ansible.builtin.systemd:

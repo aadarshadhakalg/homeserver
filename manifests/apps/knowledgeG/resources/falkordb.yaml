@@ -133,6 +133,15 @@ spec:
         - podSelector:
             matchLabels:
               app: falkordb-browser
+        # Reel Studio keeps a per-account taste graph (vlogs_acct_<id>); the API and its job pods write it.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vlogs
+          podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [vlogs-api, vlogs-worker]
       ports:
         - protocol: TCP
           port: 6379

@@ -1,0 +1,27 @@
+---
+# Reel Studio (autonomous Instagram reel editor). Its manifests live in its own
+# private repo, read with the deploy key in the argocd Secret `repo-vlogs`.
+# CI there pushes each image to Harbor and commits the new tag to deploy/k8s,
+# so a push to that repo's main is a deploy.
+#
+# Created out of band in namespace vlogs: Secrets `vlogs-secrets` (API keys,
+# database URL, basic auth) and `harbor-pull` (robot$vlogs+cluster). The
+# database is the `vlogs` entry in configuration/playbooks/postgresql.yml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vlogs
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:aadarshadhakalg/vlogs.git
+    targetRevision: main
+    path: deploy/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vlogs
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

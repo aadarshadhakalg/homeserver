@@ -81,7 +81,7 @@ Cloudflare's free plan caps request bodies at 100 MB and proxies only HTTP and W
 
 ### Secrets
 
-The repo is public. Kubernetes Secrets are created out of band with `kubectl create secret`. The manifests reference `cloudflared-token`, `redis-auth`, `harbor-db`, `harbor-admin`, `falkordb-auth` (key `password`) and `falkordb-mcp` (key `api-key`; an empty value turns MCP auth off). Setup steps for the tunnel, including its Secret, are in `manifests/apps/cloudflared/README.md`.
+The repo is public. Kubernetes Secrets are created out of band with `kubectl create secret`. The manifests reference `cloudflared-token`, `redis-auth`, `harbor-db`, `harbor-admin`, `falkordb-auth` (key `password`), `falkordb-mcp` (key `api-key`; an empty value turns MCP auth off), and for vlogs `vlogs-secrets` and `harbor-pull` in its namespace plus the Argo repo credential `repo-vlogs`. Setup steps for the tunnel, including its Secret, are in `manifests/apps/cloudflared/README.md`.
 
 ## Conventions
 
